@@ -528,6 +528,36 @@ input,select,textarea{font-size:16px!important;} /* prevents iOS zoom on focus *
     <div class="tb-name">Operations Hub</div>
   </div>
   <div class="tb-r">
+    <span id="backup-status" style="
+  font-size:9px;
+  color:var(--t3);
+  font-family:var(--mono);
+  padding:2px 6px;
+  border:.5px solid var(--bdr);
+  border-radius:4px;
+  white-space:nowrap
+">No backup yet</span>
+
+<button
+  onclick="githubBackup('manual')"
+  style="
+    display:inline-flex;
+    align-items:center;
+    gap:5px;
+    padding:5px 12px;
+    background:var(--bg3);
+    border:.5px solid var(--bdr2);
+    border-radius:6px;
+    color:var(--t2);
+    font-size:11px;
+    font-family:var(--font);
+    cursor:pointer
+  "
+  onmouseover="this.style.color='var(--grn)';this.style.borderColor='var(--grn)'"
+  onmouseout="this.style.color='var(--t2)';this.style.borderColor='var(--bdr2)'"
+>
+  ☁ Backup Now
+</button>
     <span class="save-bdg" id="save-bdg">Saved</span>
     <span class="save-bdg" id="sync-bdg" style="cursor:pointer" onclick="showCloudSetup()" title="Cloud sync settings">☁ Local only</span>
     <div style="display:flex;flex-direction:column;align-items:flex-end"><div style="font-size:12px;font-weight:600;font-family:var(--mono)" id="hdr-target">$361</div><div style="font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:.06em">Daily Target</div></div>
@@ -5101,6 +5131,88 @@ function gdEVRBar(){
     }
   });
 }
+// ── GITHUB BACKUP SYSTEM ──────────────────────────────────────────
+const GH = {
+  token:    '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',   // ghp_...
+  username: 'christiandubon01', // e.g. christiandubon01
+  repo:     'poweron-backups',
+  branch:   'main'
+};
+
+let lastBackupTime = null;
+let backupTimer    = null;
+
+async function githubBackup(triggeredBy = 'manual') {
+  try {
+    const ts       = new Date();
+    const dateStr  = ts.toISOString().slice(0, 10);
+    const timeStr  = ts.toTimeString().slice(0, 8).replace(/:/g, '-');
+    const filename = `backups/${dateStr}/poweron-${dateStr}-${timeStr}.json`;
+    const content  = JSON.stringify(S, null, 2);
+    const encoded  = btoa(unescape(encodeURIComponent(content)));
+
+    // Check if file already exists (needed to get SHA for updates)
+    const checkUrl = `https://api.github.com/repos/${GH.username}/${GH.repo}/contents/${filename}`;
+    const headers  = {
+      'Authorization': `Bearer ${GH.token}`,
+      'Content-Type':  'application/json',
+      'Accept':        'application/vnd.github+json'
+    };
+
+    let sha = undefined;
+    const check = await fetch(checkUrl, { headers });
+    if (check.ok) {
+      const existing = await check.json();
+      sha = existing.sha;
+    }
+
+    const body = {
+      message: `[${triggeredBy}] PowerOn backup ${dateStr} ${timeStr.replace(/-/g,':')}`,
+      content: encoded,
+      branch:  GH.branch
+    };
+    if (sha) body.sha = sha;
+
+    const res = await fetch(checkUrl, {
+      method:  'PUT',
+      headers,
+      body:    JSON.stringify(body)
+    });
+
+    if (res.ok) {
+      lastBackupTime = ts;
+      updateBackupBadge('✓ Backed up ' + ts.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}));
+      console.log(`[Backup] ${triggeredBy} backup saved → ${filename}`);
+    } else {
+      const err = await res.json();
+      updateBackupBadge('⚠ Backup failed');
+      console.error('[Backup] GitHub error:', err.message);
+    }
+  } catch (e) {
+    updateBackupBadge('⚠ Backup failed');
+    console.error('[Backup] Network error:', e);
+  }
+}
+
+function updateBackupBadge(text) {
+  const el = document.getElementById('backup-status');
+  if (el) el.textContent = text;
+}
+
+function startAutoBackup() {
+  if (backupTimer) clearInterval(backupTimer);
+  backupTimer = setInterval(() => {
+    githubBackup('auto-30min');
+  }, 30 * 60 * 1000); // every 30 minutes
+  console.log('[Backup] Auto-backup scheduled every 30 minutes');
+}
+
+// Start auto-backup when app loads
+window.addEventListener('load', () => {
+  startAutoBackup();
+});
+// ── END GITHUB BACKUP SYSTEM ──────────────────────────────────────
+});
 </script>
 </body>
 </html>
