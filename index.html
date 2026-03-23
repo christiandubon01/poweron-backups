@@ -2723,6 +2723,88 @@ function saveLog(){
   renderLogs();updateStrip();saveState();toast('Entry saved ✓','ok');
 }
 
+// ── GITHUB BACKUP SYSTEM ──────────────────────────────────────────
+const GH = {
+  token:    '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',   // ghp_...
+  username: 'christiandubon01', // e.g. christiandubon01
+  repo:     'poweron-backups',
+  branch:   'main'
+};
+
+let lastBackupTime = null;
+let backupTimer    = null;
+
+async function githubBackup(triggeredBy = 'manual') {
+  try {
+    const ts       = new Date();
+    const dateStr  = ts.toISOString().slice(0, 10);
+    const timeStr  = ts.toTimeString().slice(0, 8).replace(/:/g, '-');
+    const filename = `backups/${dateStr}/poweron-${dateStr}-${timeStr}.json`;
+    const content  = JSON.stringify(S, null, 2);
+    const encoded  = btoa(unescape(encodeURIComponent(content)));
+
+    // Check if file already exists (needed to get SHA for updates)
+    const checkUrl = `https://api.github.com/repos/${GH.username}/${GH.repo}/contents/${filename}`;
+    const headers  = {
+      'Authorization': `Bearer ${GH.token}`,
+      'Content-Type':  'application/json',
+      'Accept':        'application/vnd.github+json'
+    };
+
+    let sha = undefined;
+    const check = await fetch(checkUrl, { headers });
+    if (check.ok) {
+      const existing = await check.json();
+      sha = existing.sha;
+    }
+
+    const body = {
+      message: `[${triggeredBy}] PowerOn backup ${dateStr} ${timeStr.replace(/-/g,':')}`,
+      content: encoded,
+      branch:  GH.branch
+    };
+    if (sha) body.sha = sha;
+
+    const res = await fetch(checkUrl, {
+      method:  'PUT',
+      headers,
+      body:    JSON.stringify(body)
+    });
+
+    if (res.ok) {
+      lastBackupTime = ts;
+      updateBackupBadge('✓ Backed up ' + ts.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}));
+      console.log(`[Backup] ${triggeredBy} backup saved → ${filename}`);
+    } else {
+      const err = await res.json();
+      updateBackupBadge('⚠ Backup failed');
+      console.error('[Backup] GitHub error:', err.message);
+    }
+  } catch (e) {
+    updateBackupBadge('⚠ Backup failed');
+    console.error('[Backup] Network error:', e);
+  }
+}
+
+function updateBackupBadge(text) {
+  const el = document.getElementById('backup-status');
+  if (el) el.textContent = text;
+}
+
+function startAutoBackup() {
+  if (backupTimer) clearInterval(backupTimer);
+  backupTimer = setInterval(() => {
+    githubBackup('auto-30min');
+  }, 30 * 60 * 1000); // every 30 minutes
+  console.log('[Backup] Auto-backup scheduled every 30 minutes');
+}
+
+// Start auto-backup when app loads
+window.addEventListener('load', () => {
+  startAutoBackup();
+});
+// ── END GITHUB BACKUP SYSTEM ──────────────────────────────────────
+
 function updateHrsBudget(){
   const projId=$('fl-proj')?.value,p=S.projects.find(p=>p.id===projId);
   // could show budget info — left as hook
@@ -5131,87 +5213,6 @@ function gdEVRBar(){
     }
   });
 }
-// ── GITHUB BACKUP SYSTEM ──────────────────────────────────────────
-const GH = {
-  token:    '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',   // ghp_...
-  username: 'christiandubon01', // e.g. christiandubon01
-  repo:     'poweron-backups',
-  branch:   'main'
-};
-
-let lastBackupTime = null;
-let backupTimer    = null;
-
-async function githubBackup(triggeredBy = 'manual') {
-  try {
-    const ts       = new Date();
-    const dateStr  = ts.toISOString().slice(0, 10);
-    const timeStr  = ts.toTimeString().slice(0, 8).replace(/:/g, '-');
-    const filename = `backups/${dateStr}/poweron-${dateStr}-${timeStr}.json`;
-    const content  = JSON.stringify(S, null, 2);
-    const encoded  = btoa(unescape(encodeURIComponent(content)));
-
-    // Check if file already exists (needed to get SHA for updates)
-    const checkUrl = `https://api.github.com/repos/${GH.username}/${GH.repo}/contents/${filename}`;
-    const headers  = {
-      'Authorization': `Bearer ${GH.token}`,
-      'Content-Type':  'application/json',
-      'Accept':        'application/vnd.github+json'
-    };
-
-    let sha = undefined;
-    const check = await fetch(checkUrl, { headers });
-    if (check.ok) {
-      const existing = await check.json();
-      sha = existing.sha;
-    }
-
-    const body = {
-      message: `[${triggeredBy}] PowerOn backup ${dateStr} ${timeStr.replace(/-/g,':')}`,
-      content: encoded,
-      branch:  GH.branch
-    };
-    if (sha) body.sha = sha;
-
-    const res = await fetch(checkUrl, {
-      method:  'PUT',
-      headers,
-      body:    JSON.stringify(body)
-    });
-
-    if (res.ok) {
-      lastBackupTime = ts;
-      updateBackupBadge('✓ Backed up ' + ts.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}));
-      console.log(`[Backup] ${triggeredBy} backup saved → ${filename}`);
-    } else {
-      const err = await res.json();
-      updateBackupBadge('⚠ Backup failed');
-      console.error('[Backup] GitHub error:', err.message);
-    }
-  } catch (e) {
-    updateBackupBadge('⚠ Backup failed');
-    console.error('[Backup] Network error:', e);
-  }
-}
-
-function updateBackupBadge(text) {
-  const el = document.getElementById('backup-status');
-  if (el) el.textContent = text;
-}
-
-function startAutoBackup() {
-  if (backupTimer) clearInterval(backupTimer);
-  backupTimer = setInterval(() => {
-    githubBackup('auto-30min');
-  }, 30 * 60 * 1000); // every 30 minutes
-  console.log('[Backup] Auto-backup scheduled every 30 minutes');
-}
-
-// Start auto-backup when app loads
-window.addEventListener('load', () => {
-  startAutoBackup();
-});
-// ── END GITHUB BACKUP SYSTEM ──────────────────────────────────────
 });
 </script>
 </body>
